@@ -85,7 +85,11 @@ size_t minBytes = 32*1024*1024;
 size_t maxBytes = 32*1024*1024;
 size_t stepBytes = 1*1024*1024;
 size_t stepFactor = 1;
+#ifdef NCCL_TESTS_KLX
+int datacheck = 0;
+#else
 int datacheck = 1;
+#endif
 int warmup_iters = 1;
 int iters = 20;
 int agg_iters = 1;
@@ -354,7 +358,15 @@ testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   size_t count = args->expectedBytes/wordSize(type);
 
   int64_t *wrongPerGpu = nullptr;
+#ifdef NCCL_TESTS_KLX
+  wrongPerGpu = (int64_t*)calloc(args->nGpus, sizeof(int64_t));
+  if (wrongPerGpu == nullptr) {
+    fprintf(stderr, "Failed to allocate host memory for wrongPerGpu\n");
+    return testInternalError;
+  }
+#else
   CUDACHECK(cudaHostAlloc((void**)&wrongPerGpu, args->nGpus*sizeof(int64_t), cudaHostAllocMapped));
+#endif
 
   for (int i=0; i<args->nGpus; i++) {
     int rank = ((args->proc*args->nThreads + args->thread)*args->nGpus + i);
@@ -390,7 +402,11 @@ testResult_t CheckData(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
 
   *wrongElts = 0;
   for (int i=0; i < args->nGpus; i++) *wrongElts += wrongPerGpu[i];
+#ifdef NCCL_TESTS_KLX
+  free(wrongPerGpu);
+#else
   cudaFreeHost(wrongPerGpu);
+#endif
 
   if (args->reportErrors && *wrongElts) args->errors[0]++;
   return testSuccess;
@@ -458,7 +474,7 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   size_t count = args->nbytes / wordSize(type);
 
   // Try to change offset for each iteration so that we avoid cache effects and catch race conditions in ptrExchange
-  size_t totalnbytes = max(args->sendBytes, args->expectedBytes);
+  size_t totalnbytes = std::max(args->sendBytes, args->expectedBytes);
   size_t steps = totalnbytes ? args->maxbytes / totalnbytes : 1;
   size_t shift = totalnbytes * (iter % steps);
 
@@ -477,6 +493,10 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     }
     #if NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0)
     else {
+      #ifdef NCCL_TESTS_KLX
+      // KLX MVP path does not support dynamic pre-multiply reductions.
+      return testNotImplemented;
+      #else
       union {
         int8_t i8; uint8_t u8; int32_t i32; uint32_t u32; int64_t i64; uint64_t u64;
         half f16; float f32; double f64;
@@ -507,6 +527,7 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
       default: break; // Just to silence clang
       }
       NCCLCHECK(ncclRedOpCreatePreMulSum(&op, &u64, type, ncclScalarHostImmediate, args->comms[i]));
+      #endif
     }
     #endif
 
@@ -528,9 +549,11 @@ testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
     }
 
     #if NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0)
+    #ifndef NCCL_TESTS_KLX
     if(opIndex >= ncclNumOps) {
       NCCLCHECK(ncclRedOpDestroy(op, args->comms[i]));
     }
+    #endif
     #endif
   }
   if (args->nGpus > 1) NCCLCHECK(ncclGroupEnd());
@@ -730,7 +753,7 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
   do {
     for (size_t size = args->minbytes; size<=args->maxbytes; size = ((args->stepfactor > 1) ? size*args->stepfactor : size+args->stepbytes)) {
       setupArgs(size, type, args);
-      writeBenchmarkLinePreamble(max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, root);
+      writeBenchmarkLinePreamble(std::max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, root);
       TESTCHECK(BenchTime(args, type, op, root, 0));
       TESTCHECK(BenchTime(args, type, op, root, 1));
       writeBenchmarkLineTerminator(iters, "");
@@ -919,13 +942,13 @@ int main(int argc, char* argv[], char **envp) {
     if (NCCL_VERSION_CODE >= NCCL_VERSION(2,11,0) && test_ncclVersion >= NCCL_VERSION(2,11,0)) {
       test_opnum++; // PreMulSum
     }
-    #if defined(__CUDA_BF16_TYPES_EXIST__)
-    if (NCCL_VERSION_CODE >= NCCL_VERSION(2,10,0) && test_ncclVersion >= NCCL_VERSION(2,10,0)) {
+    #if HAVE_BF16
+    if (test_ncclVersion >= NCCL_VERSION(2,10,0)) {
       test_typenum++; // bfloat16
     }
     #endif
-    #if defined(__CUDA_FP8_TYPES_EXIST__)
-    if (NCCL_VERSION_CODE >= NCCL_VERSION(2,24,0) && test_ncclVersion >= NCCL_VERSION(2,24,0)) {
+    #if HAVE_FP8
+    if (test_ncclVersion >= NCCL_VERSION(2,24,0)) {
       test_typenum += 2; // fp8 e4m3,e5m2
     }
     #endif

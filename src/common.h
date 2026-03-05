@@ -15,6 +15,9 @@
 #include <stdio.h>
 #include <cstdint>
 #include <algorithm>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
 #ifdef MPI_SUPPORT
 #include "mpi.h"
 #endif
@@ -245,6 +248,13 @@ static uint64_t getHostHash(const char* hostname) {
 #define HAVE_FP8 0
 
 #if NCCL_MAJOR >= 2
+  // KLX toolchain path: enable bf16 test type by NCCL header capability,
+  // independent from CUDA's __CUDA_BF16_TYPES_EXIST__ macro.
+  #if defined(NCCL_TESTS_KLX) && NCCL_VERSION_CODE >= NCCL_VERSION(2,10,0)
+    #undef HAVE_BF16
+    #define HAVE_BF16 1
+  #endif
+
   #if defined(__CUDA_BF16_TYPES_EXIST__) && NCCL_VERSION_CODE >= NCCL_VERSION(2,10,0)
     #undef HAVE_BF16
     #define HAVE_BF16 1

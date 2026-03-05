@@ -8,11 +8,28 @@ PREFIX ?= /usr/local
 VERBOSE ?= 0
 DEBUG ?= 0
 
+# Toolchain:
+# - cuda : original nvcc pipeline
+# - klx  : compile .cu as C++ with KLX compiler (no nvcc required)
+NCCL_TESTS_TOOLCHAIN ?= cuda
+NCCL_TESTS_KLX_CXX ?= $(CXX)
+
 CUDA_LIB ?= $(CUDA_HOME)/lib64
 CUDA_INC ?= $(CUDA_HOME)/include
 NVCC ?= $(CUDA_HOME)/bin/nvcc
 CUDARTLIB ?= cudart
+PTHREAD_FLAGS ?= -pthread
 
+ifeq ($(NCCL_TESTS_TOOLCHAIN),klx)
+CXXSTD ?= -std=c++14
+CUCOMPILE ?= $(NCCL_TESTS_KLX_CXX) -x c++
+CULINK ?= $(NCCL_TESTS_KLX_CXX)
+NVCUFLAGS := $(CXXSTD) -fPIC -DNCCL_TESTS_KLX=1
+CXXFLAGS := $(CXXSTD)
+ifneq ($(CUDA_INC),)
+NVCUFLAGS += -I$(CUDA_INC)
+endif
+else
 CUDA_VERSION = $(strip $(shell which $(NVCC) >/dev/null && $(NVCC) --version | grep release | sed 's/.*release //' | sed 's/\,.*//'))
 CUDA_MAJOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 1)
 CUDA_MINOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 2)
@@ -66,11 +83,14 @@ NVCC_GENCODE ?= -gencode=arch=compute_35,code=sm_35 \
                 -gencode=arch=compute_70,code=compute_70
 endif
 
-NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) $(CXXSTD) --extended-lambda
-CXXFLAGS   := $(CXXSTD)
+NVCUFLAGS := -ccbin $(CXX) $(NVCC_GENCODE) $(CXXSTD) --extended-lambda
+CXXFLAGS := $(CXXSTD)
+CUCOMPILE ?= $(NVCC)
+CULINK ?= $(NVCC)
+endif
 
-LDFLAGS    := -L${CUDA_LIB} -lcudart -lrt
-NVLDFLAGS  := -L${CUDA_LIB} -l${CUDARTLIB} -lrt
+LDFLAGS := -L${CUDA_LIB} -l${CUDARTLIB} -lrt ${PTHREAD_FLAGS}
+NVLDFLAGS := -L${CUDA_LIB} -l${CUDARTLIB} -lrt ${PTHREAD_FLAGS}
 
 ifeq ($(DEBUG), 0)
 NVCUFLAGS += -O3 -g

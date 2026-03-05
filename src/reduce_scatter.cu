@@ -27,7 +27,11 @@ testResult_t ReduceScatterInitData(struct threadArgs* args, ncclDataType_t type,
     CUDACHECK(cudaMemset(args->recvbuffs[i], 0, args->expectedBytes));
     void* data = in_place ? args->recvbuffs[i] : args->sendbuffs[i];
     TESTCHECK(InitData(data, sendcount, 0, type, op, rep, nranks, rank));
+#ifdef NCCL_TESTS_KLX
+    CUDACHECK(cudaMemcpy(args->expected[i], args->recvbuffs[i], args->expectedBytes, cudaMemcpyDeviceToDevice));
+#else
     CUDACHECK(cudaMemcpy(args->expected[i], args->recvbuffs[i], args->expectedBytes, cudaMemcpyDefault));
+#endif
     TESTCHECK(InitDataReduce(args->expected[i], recvcount, rank*recvcount, type, op, rep, nranks));
     CUDACHECK(cudaDeviceSynchronize());
   }

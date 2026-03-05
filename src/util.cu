@@ -19,6 +19,9 @@
 #include "util.h"
 #include <assert.h>
 #include <errno.h>
+#include <algorithm>
+#include <stdlib.h>
+#include <string.h>
 #include <string>
 #include <iomanip>
 
@@ -115,7 +118,7 @@ static bool sanitizeJson(char out[], int lim, const char *in) {
 static void jsonPushState(json_state_t state) {
   assert(state != JSON_NONE);
   if(state_cap <= (state_n+1)) {
-    state_cap = max((size_t)16, state_cap*2);
+    state_cap = std::max((size_t)16, state_cap*2);
     states = (json_state_t *)realloc(states, sizeof(json_state_t)*state_cap);
     assert(states);
   }
